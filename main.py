@@ -2,6 +2,7 @@ import os
 import shutil
 import mistune
 import json
+import sys
 from datetime import datetime
 
 def read_config():
@@ -12,12 +13,14 @@ def read_config():
         with open("config.json", "w") as f:
             default_config = {
                 "default_template": "base",
-                "site_title": "My website"
+                "site_title": "My website",
+                "site_url": "https://example.com",
+                "site_description": "My personal website"
             }
             json.dump(default_config, f, indent=4)
             return default_config
 
-def convert_md_to_html(md_text):
+def convert_md_to_html(md_text, filepath):
     md_text = md_text.split("===")
     
     for idx, part in enumerate(md_text):
@@ -32,7 +35,11 @@ def convert_md_to_html(md_text):
 
     parsed_metadata = {}
     if metadata:
-        parsed_metadata = json.loads(metadata)
+        try:
+            parsed_metadata = json.loads(metadata)
+        except json.JSONDecodeError as e:
+            print(f"ERROR: JSON parse error in file '{filepath}': {e}")
+            sys.exit(1)
 
         if "template" in parsed_metadata:
             template_name = parsed_metadata["template"]
@@ -74,7 +81,7 @@ def process_directory(content_dir, output_dir, blog_posts=None):
             process_directory(item_path, output_subdir, blog_posts)
         elif item.endswith(".md"):
             md_text = read_file(item_path)
-            html_text, metadata = convert_md_to_html(md_text)
+            html_text, metadata = convert_md_to_html(md_text, item_path)
             output_filename = item.replace(".md", ".html")
             output_path = os.path.join(output_dir, output_filename)
             write_file(output_path, html_text)
@@ -117,16 +124,100 @@ def generate_blog_page(blog_posts):
     
     write_file(os.path.join("public", "blog.html"), page)
 
-if not os.path.exists("public"):
-    os.makedirs("public")
-else:
-    shutil.rmtree("public")
-    os.makedirs("public")
+def generate_rss_feed(blog_posts):
+    config = read_config()
+    blog_posts.sort(key=lambda x: x["metadata"].get("date", ""), reverse=True)
+    
+    rss = f"""<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>{config['site_title']}</title>
+    <link>{config['site_url']}</link>
+    <description>{config['site_description']}</description>
+    <language>en</language>
+    <lastBuildDate>{datetime.now().strftime('%a, %d %b %Y %H:%M:%S %z')}</lastBuildDate>
+"""
+    
+    for post in blog_posts:
+        title = post["title"]
+        path = post["path"]
+        url = f"{config['site_url']}/{path}"
+        date = post["metadata"].get("date", "")
+        description = post["metadata"].get("description", title)
+        
+        if date:
+            try:
+                parsed_date = datetime.fromisoformat(date.replace("Z", "+00:00"))
+                rfc822_date = parsed_date.strftime('%a, %d %b %Y %H:%M:%S %z')
+            except:
+                rfc822_date = datetime.now().strftime('%a, %d %b %Y %H:%M:%S %z')
+        else:
+            rfc822_date = datetime.now().strftime('%a, %d %b %Y %H:%M:%S %z')
+        
+        rss += f"""
+    <item>
+      <title>{title}</title>
+      <link>{url}</link>
+      <description>{description}</description>
+      <pubDate>{rfc822_date}</pubDate>
+      <guid>{url}</guid>
+    </item>"""
+    
+    rss += """
+  </channel>
+</rss>"""
+    
+    write_file(os.path.join("public", "rss.xml"), rss)
 
-if not os.path.exists("templates"):
-    os.makedirs("templates")
-    with open(os.path.join("templates", "base.html"), "w") as f:
-        f.write("""<!DOCTYPE html>
+def create_post(title):
+    if not os.path.exists(os.path.join("content", "blog")):
+        os.makedirs(os.path.join("content", "blog"))
+    
+    slug = title.lower().replace(" ", "_").replace("'", "").replace('"', "")
+    slug = "".join(c for c in slug if c.isalnum() or c == "-")
+    current_date = datetime.now().isoformat()
+    
+    filename = f"{slug}.md"
+    filepath = os.path.join("content", "blog", filename)
+    
+    if os.path.exists(filepath):
+        print(f"ERROR: Post '{filename}' already exists!")
+        sys.exit(1)
+    
+    post_content = """{
+    "title": "%s",
+    "date": "%s",
+}
+===
+
+# %s
+
+Write your post content here...
+""" % (title, current_date, title)
+    
+    write_file(filepath, post_content)
+    print(f"Created new post: {filepath}")
+
+def main():
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "post" and len(sys.argv) > 2:
+            title = " ".join(sys.argv[2:])
+            create_post(title)
+            return
+        else:
+            print("Usage: python main.py [post <title>]")
+            return
+
+    if not os.path.exists("public"):
+        os.makedirs("public")
+    else:
+        shutil.rmtree("public")
+        os.makedirs("public")
+
+    if not os.path.exists("templates"):
+        os.makedirs("templates")
+        with open(os.path.join("templates", "base.html"), "w") as f:
+            f.write("""<!DOCTYPE html>
 <html>
     <head>
         <meta charset="UTF-8">
@@ -137,20 +228,26 @@ if not os.path.exists("templates"):
     </body>
 </html>""")
 
-if not os.path.exists("static"):
-    os.makedirs("static")
+    if not os.path.exists("static"):
+        os.makedirs("static")
 
-if not os.path.exists("content"):
-    os.makedirs("content")
-    with open(os.path.join("content", "index.md"), "w") as f:
-        f.write("# Welcome to My Website\nThis is the homepage. Edit `content/index.md` to change this text.")
+    if not os.path.exists("content"):
+        os.makedirs("content")
+        with open(os.path.join("content", "index.md"), "w") as f:
+            f.write("# Welcome to My Website\nThis is the homepage. Edit `content/index.md` to change this text.")
 
-blog_posts = []
-has_blog_dir = os.path.exists(os.path.join("content", "blog"))
+    blog_posts = []
+    has_blog_dir = os.path.exists(os.path.join("content", "blog"))
 
-process_directory("content", "public", blog_posts if has_blog_dir else None)
+    process_directory("content", "public", blog_posts if has_blog_dir else None)
 
-if has_blog_dir and blog_posts:
-    generate_blog_page(blog_posts)
+    if has_blog_dir and blog_posts:
+        generate_blog_page(blog_posts)
+        generate_rss_feed(blog_posts)
 
-shutil.copytree("static", "public", dirs_exist_ok=True)
+    shutil.copytree("static", "public", dirs_exist_ok=True)
+    
+    print("Site generated successfully!")
+
+if __name__ == "__main__":
+    main()
