@@ -61,7 +61,7 @@ def convert_md_to_html(md_text, filepath):
     page = base_html.replace("{{ title }}", title)
     page = page.replace("{{ content }}", html)
 
-    return page, parsed_metadata
+    return page, parsed_metadata, html, title
 
 def read_file(filepath):
     with open(filepath, "r") as f:
@@ -71,20 +71,33 @@ def write_file(filepath, content):
     with open(filepath, "w") as f:
         f.write(content)
 
-def process_directory(content_dir, output_dir, blog_posts=None):
+def process_directory(content_dir, output_dir, blog_posts=None, pages_data=None):
     for item in os.listdir(content_dir):
         item_path = os.path.join(content_dir, item)
         
         if os.path.isdir(item_path):
             output_subdir = os.path.join(output_dir, item)
             os.makedirs(output_subdir, exist_ok=True)
-            process_directory(item_path, output_subdir, blog_posts)
+            process_directory(item_path, output_subdir, blog_posts, pages_data)
         elif item.endswith(".md"):
             md_text = read_file(item_path)
-            html_text, metadata = convert_md_to_html(md_text, item_path)
+            html_text, metadata, content_html, title = convert_md_to_html(md_text, item_path)
             output_filename = item.replace(".md", ".html")
             output_path = os.path.join(output_dir, output_filename)
             write_file(output_path, html_text)
+            
+            if pages_data is not None:
+                relative_path = os.path.relpath(output_path, "public")
+                route = "/" + relative_path.replace(".html", "").replace("index", "")
+                if route == "/":
+                    route = "/"
+                elif route.endswith("/"):
+                    route = route[:-1]
+                
+                pages_data[route] = {
+                    "title": title,
+                    "content": content_html
+                }
             
             if blog_posts is not None and content_dir.endswith("blog"):
                 relative_path = os.path.relpath(output_path, "public")
@@ -94,7 +107,7 @@ def process_directory(content_dir, output_dir, blog_posts=None):
                     "title": metadata.get("title", output_filename.replace(".html", ""))
                 })
 
-def generate_blog_page(blog_posts):
+def generate_blog_page(blog_posts, pages_data=None):
     blog_posts.sort(key=lambda x: x["metadata"].get("date", ""), reverse=True)
     
     config = read_config()
@@ -107,15 +120,17 @@ def generate_blog_page(blog_posts):
         path = post["path"]
         date = post["metadata"].get("date", "")
         
+        route = "/" + path.replace(".html", "")
+        
         if date:
             try:
                 parsed_date = datetime.fromisoformat(date.replace("Z", "+00:00"))
                 formatted_date = parsed_date.strftime("%B %d, %Y")
-                blog_html += f'  <li><a href="{path}">{title}</a> - {formatted_date}</li>\n'
+                blog_html += f'  <li><a href="{route}" data-spa-link>{title}</a> - {formatted_date}</li>\n'
             except:
-                blog_html += f'  <li><a href="{path}">{title}</a></li>\n'
+                blog_html += f'  <li><a href="{route}" data-spa-link>{title}</a></li>\n'
         else:
-            blog_html += f'  <li><a href="{path}">{title}</a></li>\n'
+            blog_html += f'  <li><a href="{route}" data-spa-link>{title}</a></li>\n'
     
     blog_html += "</ul>"
     
@@ -123,6 +138,12 @@ def generate_blog_page(blog_posts):
     page = page.replace("{{ content }}", blog_html)
     
     write_file(os.path.join("public", "blog.html"), page)
+    
+    if pages_data is not None:
+        pages_data["/blog"] = {
+            "title": f"Blog - {config['site_title']}",
+            "content": blog_html
+        }
 
 def generate_rss_feed(blog_posts):
     config = read_config()
@@ -169,12 +190,150 @@ def generate_rss_feed(blog_posts):
     
     write_file(os.path.join("public", "rss.xml"), rss)
 
+def generate_spa_data(pages_data):
+    spa_js = f"""
+// SPA Router and Page Data
+const PAGES_DATA = {json.dumps(pages_data, indent=2)};
+
+class SPARouter {{
+    constructor() {{
+        this.currentPath = window.location.pathname;
+        this.init();
+    }}
+
+    init() {{
+        // Handle initial page load
+        this.loadPage(this.currentPath);
+        
+        // Handle browser back/forward buttons
+        window.addEventListener('popstate', (e) => {{
+            this.loadPage(window.location.pathname, false);
+        }});
+        
+        // Handle SPA link clicks
+        document.addEventListener('click', (e) => {{
+            const link = e.target.closest('a[data-spa-link]');
+            if (link) {{
+                e.preventDefault();
+                const href = link.getAttribute('href');
+                this.navigateTo(href);
+            }}
+        }});
+        
+        // Convert regular internal links to SPA links
+        this.convertInternalLinks();
+    }}
+
+    convertInternalLinks() {{
+        const links = document.querySelectorAll('a:not([data-spa-link]):not([href^="http"]):not([href^="#"]):not([href^="mailto"]):not([href^="tel"])');
+        links.forEach(link => {{
+            const href = link.getAttribute('href');
+            if (href && !href.includes('.xml') && !href.includes('.txt') && !href.includes('.gif') && !href.includes('.jpg') && !href.includes('.png')) {{
+                link.setAttribute('data-spa-link', '');
+            }}
+        }});
+    }}
+
+    navigateTo(path) {{
+        if (path === this.currentPath) return;
+        
+        history.pushState(null, '', path);
+        this.loadPage(path, true);
+    }}
+
+    loadPage(path, updateHistory = false) {{
+        // Normalize path
+        let normalizedPath = path;
+        if (normalizedPath === '' || normalizedPath === '/') {{
+            normalizedPath = '/';
+        }} else if (normalizedPath.endsWith('/')) {{
+            normalizedPath = normalizedPath.slice(0, -1);
+        }}
+        
+        // Remove .html extension from path for lookup
+        if (normalizedPath.endsWith('.html')) {{
+            normalizedPath = normalizedPath.replace('.html', '');
+        }}
+        if (normalizedPath === '') {{
+            normalizedPath = '/';
+        }}
+        
+        // Check if page exists in our data
+        let pageData = PAGES_DATA[normalizedPath];
+        
+        // Fallback for index pages
+        if (!pageData && normalizedPath === '/') {{
+            pageData = PAGES_DATA['/'] || PAGES_DATA['/index'];
+        }}
+        
+        if (pageData) {{
+            document.title = pageData.title;
+            
+            // Find the main content container
+            const mainContentContainer = document.querySelector('.main-content');
+            if (!mainContentContainer) {{
+                console.error('Main content container not found');
+                return;
+            }}
+            
+            // Update the window title attribute
+            mainContentContainer.setAttribute('data-window-title', pageData.title);
+            
+            // Simple fade effect
+            mainContentContainer.style.opacity = '0.7';
+            
+            setTimeout(() => {{
+                // Find the content area (everything after window controls)
+                const windowControls = mainContentContainer.querySelector('.window-controls');
+                
+                // Clear existing content but preserve window controls
+                const children = Array.from(mainContentContainer.children);
+                children.forEach(child => {{
+                    if (!child.classList.contains('window-controls')) {{
+                        child.remove();
+                    }}
+                }});
+                
+                // Add new content
+                const contentDiv = document.createElement('div');
+                contentDiv.innerHTML = pageData.content;
+                mainContentContainer.appendChild(contentDiv);
+                
+                mainContentContainer.style.opacity = '1';
+                
+                // Re-initialize SPA links for new content
+                this.convertInternalLinks();
+                
+                // Scroll to top
+                window.scrollTo(0, 0);
+            }}, 100);
+            
+            this.currentPath = normalizedPath;
+        }} else {{
+            // Page not found in SPA data, do regular navigation
+            window.location.href = path;
+        }}
+    }}
+}}
+
+// Initialize SPA when DOM is ready
+if (document.readyState === 'loading') {{
+    document.addEventListener('DOMContentLoaded', () => {{
+        new SPARouter();
+    }});
+}} else {{
+    new SPARouter();
+}}
+"""
+    
+    write_file(os.path.join("public", "spa.js"), spa_js)
+
 def create_post(title):
     if not os.path.exists(os.path.join("content", "blog")):
         os.makedirs(os.path.join("content", "blog"))
     
     slug = title.lower().replace(" ", "_").replace("'", "").replace('"', "")
-    slug = "".join(c for c in slug if c.isalnum() or c == "-")
+    slug = "".join(c for c in slug if c.isalnum() or c == "_")
     current_date = datetime.now().isoformat()
     
     filename = f"{slug}.md"
@@ -222,9 +381,15 @@ def main():
     <head>
         <meta charset="UTF-8">
         <title>{{ title }}</title>
+        <style>
+            body {
+                transition: opacity 0.2s ease-in-out;
+            }
+        </style>
     </head>
     <body>
         {{ content }}
+        <script src="/spa.js"></script>
     </body>
 </html>""")
 
@@ -237,17 +402,20 @@ def main():
             f.write("# Welcome to My Website\nThis is the homepage. Edit `content/index.md` to change this text.")
 
     blog_posts = []
+    pages_data = {}
     has_blog_dir = os.path.exists(os.path.join("content", "blog"))
 
-    process_directory("content", "public", blog_posts if has_blog_dir else None)
+    process_directory("content", "public", blog_posts if has_blog_dir else None, pages_data)
 
     if has_blog_dir and blog_posts:
-        generate_blog_page(blog_posts)
+        generate_blog_page(blog_posts, pages_data)
         generate_rss_feed(blog_posts)
+
+    generate_spa_data(pages_data)
 
     shutil.copytree("static", "public", dirs_exist_ok=True)
     
-    print("Site generated successfully!")
+    print("Site generated successfully with SPA functionality!")
 
 if __name__ == "__main__":
     main()
