@@ -97,4 +97,4 @@ for filename in os.listdir("content"):
         output_filename = filename.replace(".md", ".html")
         write_file(os.path.join("public", output_filename), html_text)
 
-shutil.copytree("static", os.path.join("public", "static"), dirs_exist_ok=True)
+shutil.copytree("static", "public", dirs_exist_ok=True)
