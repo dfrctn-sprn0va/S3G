@@ -186,7 +186,7 @@ def create_post(title):
     
     post_content = """{
     "title": "%s",
-    "date": "%s",
+    "date": "%s"
 }
 ===
 
