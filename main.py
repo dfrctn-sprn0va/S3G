@@ -415,7 +415,7 @@ def main():
 
     shutil.copytree("static", "public", dirs_exist_ok=True)
     
-    print("Site generated successfully with SPA functionality!")
+    print("Site generated successfully!")
 
 if __name__ == "__main__":
     main()
