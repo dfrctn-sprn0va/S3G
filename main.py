@@ -10,7 +10,7 @@ def read_config():
         with open("config.json", "r") as f:
             return json.load(f)
     else:
-        with open("config.json", "w") as f:
+        with open("config.json", "w", encoding="utf-8") as f:
             default_config = {
                 "default_template": "base",
                 "site_title": "My website",
@@ -57,18 +57,20 @@ def convert_md_to_html(md_text, filepath):
     template_path = os.path.join("templates", f"{template_name}.html")
     base_html = read_file(template_path)
 
-    html = str(mistune.html(md_text))
+    renderer = mistune.HTMLRenderer()
+    markdown = mistune.Markdown(renderer=renderer, inline=mistune.InlineParser(False))
+    html = str(markdown(md_text))
     page = base_html.replace("{{ title }}", title)
     page = page.replace("{{ content }}", html)
 
     return page, parsed_metadata, html, title
 
 def read_file(filepath):
-    with open(filepath, "r") as f:
+    with open(filepath, "r", encoding="utf-8") as f:
         return f.read()
 
 def write_file(filepath, content):
-    with open(filepath, "w") as f:
+    with open(filepath, "w", encoding="utf-8") as f:
         f.write(content)
 
 def process_directory(content_dir, output_dir, blog_posts=None, pages_data=None):
@@ -375,7 +377,7 @@ def main():
 
     if not os.path.exists("templates"):
         os.makedirs("templates")
-        with open(os.path.join("templates", "base.html"), "w") as f:
+        with open(os.path.join("templates", "base.html"), "w", encoding="utf-8") as f:
             f.write("""<!DOCTYPE html>
 <html>
     <head>
@@ -398,7 +400,7 @@ def main():
 
     if not os.path.exists("content"):
         os.makedirs("content")
-        with open(os.path.join("content", "index.md"), "w") as f:
+        with open(os.path.join("content", "index.md"), "w", encoding="utf-8") as f:
             f.write("# Welcome to My Website\nThis is the homepage. Edit `content/index.md` to change this text.")
 
     blog_posts = []
