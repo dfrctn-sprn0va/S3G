@@ -60,6 +60,7 @@ def convert_md_to_html(md_text, filepath):
     renderer = mistune.HTMLRenderer()
     markdown = mistune.Markdown(renderer=renderer, inline=mistune.InlineParser(False))
     html = str(markdown(md_text))
+    html = html.replace('</p>\n<p>', '</p>\n\n<p>')
     page = base_html.replace("{{ title }}", title)
     page = page.replace("{{ content }}", html)
 
