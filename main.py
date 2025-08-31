@@ -15,7 +15,8 @@ def read_config():
                 "default_template": "base",
                 "site_title": "My website",
                 "site_url": "https://example.com",
-                "site_description": "My personal website"
+                "site_description": "My personal website",
+                "inline_rendering": "true",
             }
             json.dump(default_config, f, indent=4)
             return default_config
@@ -58,7 +59,7 @@ def convert_md_to_html(md_text, filepath):
     base_html = read_file(template_path)
 
     renderer = mistune.HTMLRenderer()
-    markdown = mistune.Markdown(renderer=renderer, inline=mistune.InlineParser(False))
+    markdown = mistune.Markdown(renderer=renderer, inline=mistune.InlineParser(read_config()["inline_rendering"].lower() == "true"))
     html = str(markdown(md_text))
     page = base_html.replace("{{ title }}", title)
     page = page.replace("{{ content }}", html)
